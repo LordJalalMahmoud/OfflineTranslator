@@ -17,7 +17,7 @@ import time
 import signal
 import argparse
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
 
 # محاولة استيراد CTranslate2 و SentencePiece
 try:
@@ -39,6 +39,20 @@ SPECIAL_GAME_TOKENS = {
     "<PRO_HISHER>", "<DAYNIGHT>", "<GABBER>", "<PLAYER1>",
     "<PLAYER2>", "<PLAYER3>", "<PLAYER4>", "<PLAYER5>", "<PLAYER6>",
 }
+
+
+def find_nllb_model_dir() -> Optional[Path]:
+    """البحث التلقائي عن مسار نموذج Meta NLLB-200 المحلي."""
+    root_dir = Path(__file__).resolve().parent.parent
+    candidates = [
+        root_dir / "models" / "nllb-600m-ct2",
+        root_dir.parent / "nllb_translator" / "models" / "nllb-600m-ct2",
+        Path.home() / "nllb_translator" / "models" / "nllb-600m-ct2",
+    ]
+    for c in candidates:
+        if (c / "model.bin").exists():
+            return c
+    return None
 
 
 def find_model_dir() -> Path:
@@ -129,34 +143,46 @@ class TurboArabicTranslator:
     def __init__(
         self,
         model_dir: Path,
-        batch_size: int = 128,
+        engine_type: str = "nllb",
+        dialect: str = "arb_Arab",
+        batch_size: int = 64,
         inter_threads: int = 2,
         intra_threads: int = 2,
         cache_path: Path = None,
     ):
         self.model_dir = model_dir
+        self.engine_type = engine_type
+        self.dialect = dialect
         self.batch_size = batch_size
         self.cache_path = cache_path
         self.cache: Dict[str, str] = {}
 
-        # 1. تهيئة معالج SentencePiece
-        sp_model_path = model_dir / "sentencepiece.model"
-        if not sp_model_path.exists():
-            raise FileNotFoundError(f"SentencePiece model not found at {sp_model_path}")
-        self.sp = spm.SentencePieceProcessor(model_file=str(sp_model_path))
+        if self.engine_type == "nllb":
+            print(f"[ENGINE] استخدام محرك الذكاء الاصطناعي Meta NLLB-200 (اللهجة: {self.dialect})...")
+            from transformers import AutoTokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(str(model_dir), src_lang="eng_Latn")
+            self.translator = ctranslate2.Translator(
+                str(model_dir),
+                device="cpu",
+                inter_threads=inter_threads,
+                intra_threads=intra_threads,
+                compute_type="int8",
+            )
+        else:
+            print("[ENGINE] استخدام محرك Argos Translate الكلاسيكي السريع...")
+            sp_model_path = model_dir / "sentencepiece.model"
+            if not sp_model_path.exists():
+                raise FileNotFoundError(f"SentencePiece model not found at {sp_model_path}")
+            self.sp = spm.SentencePieceProcessor(model_file=str(sp_model_path))
 
-        # 2. تهيئة محرك CTranslate2 المكتوب بلغة C++
-        ct_model_dir = model_dir / "model"
-        if not ct_model_dir.exists():
-            raise FileNotFoundError(f"CTranslate2 model dir not found at {ct_model_dir}")
-
-        self.translator = ctranslate2.Translator(
-            str(ct_model_dir),
-            device="cpu",
-            inter_threads=inter_threads,
-            intra_threads=intra_threads,
-            compute_type="int8",
-        )
+            ct_model_dir = model_dir / "model" if (model_dir / "model").exists() else model_dir
+            self.translator = ctranslate2.Translator(
+                str(ct_model_dir),
+                device="cpu",
+                inter_threads=inter_threads,
+                intra_threads=intra_threads,
+                compute_type="int8",
+            )
 
         # تحميل الكاش القديم إن وجد
         self.load_cache()
@@ -186,25 +212,44 @@ class TurboArabicTranslator:
         if not texts:
             return []
 
-        # 1. ترميز بالـ SentencePiece
-        tokens_batch = [self.sp.encode(t, out_type=str) for t in texts]
+        if self.engine_type == "nllb":
+            tokens_batch = [self.tokenizer.convert_ids_to_tokens(self.tokenizer.encode(t)) for t in texts]
+            results = self.translator.translate_batch(
+                tokens_batch,
+                target_prefix=[[self.dialect]] * len(texts),
+                beam_size=1,
+                max_batch_size=self.batch_size,
+                batch_type="examples",
+            )
+            translations = []
+            for r in results:
+                hyp = r.hypotheses[0]
+                if hyp and hyp[0] == self.dialect:
+                    hyp = hyp[1:]
+                sub_ids = self.tokenizer.convert_tokens_to_ids(hyp)
+                decoded = self.tokenizer.decode(sub_ids, skip_special_tokens=True).strip()
+                translations.append(decoded)
+            return translations
+        else:
+            # 1. ترميز بالـ SentencePiece
+            tokens_batch = [self.sp.encode(t, out_type=str) for t in texts]
 
-        # 2. الترجمة في محرك C++ CTranslate2 مع greedy search (beam_size=1) لأقصى سرعة
-        results = self.translator.translate_batch(
-            tokens_batch,
-            beam_size=1,
-            max_batch_size=self.batch_size,
-            batch_type="examples",
-            replace_unknowns=True,
-        )
+            # 2. الترجمة في محرك C++ CTranslate2 مع greedy search (beam_size=1) لأقصى سرعة
+            results = self.translator.translate_batch(
+                tokens_batch,
+                beam_size=1,
+                max_batch_size=self.batch_size,
+                batch_type="examples",
+                replace_unknowns=True,
+            )
 
-        # 3. فك الترميز للحصول على النص العربي الأصلي مباشرة
-        translations = []
-        for r in results:
-            arabic_str = self.sp.decode_pieces(r.hypotheses[0]).replace("▁", " ").strip()
-            translations.append(arabic_str)
+            # 3. فك الترميز للحصول على النص العربي الأصلي مباشرة
+            translations = []
+            for r in results:
+                arabic_str = self.sp.decode_pieces(r.hypotheses[0]).replace("▁", " ").strip()
+                translations.append(arabic_str)
 
-        return translations
+            return translations
 
 
 def process_file(
@@ -349,13 +394,20 @@ def process_file(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Turbo Offline Game Translator (EN -> Arabic Standard)")
+    nllb_dir = find_nllb_model_dir()
+    default_engine = "nllb" if nllb_dir else "argos"
+
+    parser = argparse.ArgumentParser(description="Turbo Offline Game Translator (EN -> Arabic Standard & Egyptian)")
     parser.add_argument("--input", "-i", type=str, default="../dialog.json", help="مسار ملف الإدخال")
     parser.add_argument("--output", "-o", type=str, default="dialog_arabic.json", help="مسار ملف الإخراج (عربي)")
-    parser.add_argument("--batch-size", "-b", type=int, default=128, help="حجم الدفعة (افتراضي: 128)")
+    parser.add_argument("--engine", "-e", type=str, choices=["nllb", "argos"], default=default_engine,
+                        help=f"محرك الترجمة: nllb (عالي الجودة) أو argos (خفيف وسريع) - الافتراضي: {default_engine}")
+    parser.add_argument("--dialect", "-d", type=str, choices=["arb_Arab", "arz_Arab"], default="arb_Arab",
+                        help="اللهجة عند استخدام NLLB: arb_Arab (فصحى) أو arz_Arab (مصري عامية)")
+    parser.add_argument("--batch-size", "-b", type=int, default=None, help="حجم الدفعة (افتراضي: 64 لـ NLLB، و128 لـ Argos)")
     parser.add_argument("--inter-threads", type=int, default=2, help="عدد مسارات المعالجة المتزامنة (افتراضي: 2)")
     parser.add_argument("--intra-threads", type=int, default=2, help="عدد خيوط العمل للعملية الواحدة (افتراضي: 2)")
-    parser.add_argument("--cache", type=str, default="translation_cache.json", help="مسار ملف حفظ الكاش العربي")
+    parser.add_argument("--cache", type=str, default=None, help="مسار ملف حفظ الكاش العربي")
     parser.add_argument("--model-dir", type=str, default=None, help="مسار مجلد النموذج إن كان مخصصاً")
 
     args = parser.parse_args()
@@ -370,21 +422,41 @@ def main():
             sys.exit(1)
 
     output_path = Path(args.output)
-    cache_path = Path(args.cache)
 
-    if args.model_dir:
-        model_dir = Path(args.model_dir)
+    # تحديد النموذج والكاش وحجم الدفعة الافتراضي
+    if args.engine == "nllb":
+        if args.model_dir:
+            model_dir = Path(args.model_dir)
+        elif nllb_dir:
+            model_dir = nllb_dir
+        else:
+            print("[ERROR] لم يتم العثور على نموذج Meta NLLB-200. يرجى تنزيله أو تحديد مساره عبر --model-dir")
+            sys.exit(1)
+        batch_size = args.batch_size if args.batch_size else 64
+        default_cache = "translation_cache_nllb.json" if args.dialect == "arb_Arab" else "translation_cache_nllb_egypt.json"
     else:
-        model_dir = find_model_dir()
+        model_dir = Path(args.model_dir) if args.model_dir else find_model_dir()
+        batch_size = args.batch_size if args.batch_size else 128
+        default_cache = "translation_cache.json"
 
+    cache_path = Path(args.cache) if args.cache else Path(default_cache)
+
+    print("=" * 65)
+    print(f"• المحرك المستخدم: {args.engine.upper()} {'(Meta NLLB-200)' if args.engine == 'nllb' else '(Argos Translate)'}")
+    if args.engine == "nllb":
+        print(f"• اللهجة المستهدفة: {'عربي فصحى (arb_Arab)' if args.dialect == 'arb_Arab' else 'لهجة مصرية عامية (arz_Arab)'}")
     print(f"• مجلد النموذج: {model_dir}")
+    print(f"• حجم الدفعة (Batch Size): {batch_size}")
     print(f"• ملف الإدخال: {input_path}")
     print(f"• ملف الإخراج العربي: {output_path}")
     print(f"• ملف الكاش العربي: {cache_path}")
+    print("=" * 65)
 
     translator = TurboArabicTranslator(
         model_dir=model_dir,
-        batch_size=args.batch_size,
+        engine_type=args.engine,
+        dialect=args.dialect,
+        batch_size=batch_size,
         inter_threads=args.inter_threads,
         intra_threads=args.intra_threads,
         cache_path=cache_path,
@@ -403,7 +475,7 @@ def main():
         input_path=input_path,
         output_path=output_path,
         translator=translator,
-        batch_size=args.batch_size,
+        batch_size=batch_size,
     )
 
 

@@ -6,6 +6,8 @@
 document.addEventListener("DOMContentLoaded", () => {
   // State
   let currentMode = "dual"; // 'dual', 'arabic', 'arabizi'
+  let currentEngine = "nllb"; // 'nllb', 'argos'
+  let currentDialect = "arz_Arab"; // 'arz_Arab' (Egyptian), 'arb_Arab' (Standard)
   let isLiveTranslate = true;
   let debounceTimer = null;
   let activeTaskId = null;
@@ -16,6 +18,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const tabContents = document.querySelectorAll(".tab-content");
   const themeToggle = document.getElementById("themeToggle");
   const modeButtons = document.querySelectorAll(".mode-btn");
+  const engineButtons = document.querySelectorAll(".engine-btn");
+  const dialectButtons = document.querySelectorAll(".dialect-btn");
+  const dialectGroup = document.getElementById("dialectSelectorGroup");
   const gridContainer = document.getElementById("translatorGrid");
 
   const inputEnglish = document.getElementById("inputEnglish");
@@ -92,6 +97,33 @@ document.addEventListener("DOMContentLoaded", () => {
         paneFranco.style.display = "flex";
       }
 
+      doTranslate();
+    });
+  });
+
+  // Engine Switching
+  engineButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      engineButtons.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentEngine = btn.dataset.engine;
+
+      if (currentEngine === "nllb") {
+        if (dialectGroup) dialectGroup.style.display = "inline-flex";
+      } else {
+        if (dialectGroup) dialectGroup.style.display = "none";
+      }
+
+      doTranslate();
+    });
+  });
+
+  // Dialect Switching
+  dialectButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      dialectButtons.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentDialect = btn.dataset.dialect;
       doTranslate();
     });
   });
@@ -175,7 +207,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const resp = await fetch("/api/translate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, mode: currentMode })
+        body: JSON.stringify({
+          text,
+          mode: currentMode,
+          engine: currentEngine,
+          dialect: currentDialect,
+        })
       });
 
       if (!resp.ok) throw new Error("Translation failed");
@@ -184,9 +221,12 @@ document.addEventListener("DOMContentLoaded", () => {
       outputArabic.textContent = res.arabic || "";
       outputFranco.textContent = res.arabizi || "";
 
+      const engineName = res.engine === "nllb"
+        ? (res.dialect === "arz_Arab" ? "NLLB 🇪🇬" : "NLLB 🇸🇦")
+        : "Argos ⚡";
       const badgeText = res.source === "cache" 
-        ? `⚡ كاش: ${res.elapsed_ms}ms` 
-        : `🧠 نموذج: ${res.elapsed_ms}ms`;
+        ? `⚡ كاش (${engineName}): ${res.elapsed_ms}ms` 
+        : `🧠 ${engineName}: ${res.elapsed_ms}ms`;
 
       badgeArabicTime.textContent = badgeText;
       badgeFrancoTime.textContent = badgeText;
@@ -360,13 +400,37 @@ document.addEventListener("DOMContentLoaded", () => {
     reader.readAsText(file);
   }
 
+  // Handle File Engine changes
+  const fileEngineSelect = document.getElementById("fileEngine");
+  const fileDialectContainer = document.getElementById("fileDialectContainer");
+  const fileBatchSizeSelect = document.getElementById("fileBatchSize");
+
+  if (fileEngineSelect) {
+    fileEngineSelect.addEventListener("change", () => {
+      if (fileEngineSelect.value === "nllb") {
+        if (fileDialectContainer) fileDialectContainer.style.display = "block";
+        fileBatchSizeSelect.value = "64";
+      } else {
+        if (fileDialectContainer) fileDialectContainer.style.display = "none";
+        fileBatchSizeSelect.value = "128";
+      }
+    });
+  }
+
   // Start File Translation
   document.getElementById("btnStartFileTranslation").addEventListener("click", async () => {
     const mode = document.getElementById("fileTransMode").value;
     const batchSize = parseInt(document.getElementById("fileBatchSize").value);
     const selectedPath = document.getElementById("selectedFilePath").value.trim();
+    const fileEngine = fileEngineSelect ? fileEngineSelect.value : "nllb";
+    const fileDialect = document.getElementById("fileDialect") ? document.getElementById("fileDialect").value : "arz_Arab";
 
-    let payload = { mode, batch_size: batchSize };
+    let payload = {
+      mode,
+      batch_size: batchSize,
+      engine: fileEngine,
+      dialect: fileDialect,
+    };
 
     if (selectedPath) {
       payload.type = "path";
@@ -512,7 +576,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function searchCache(query) {
     if (!query) {
-      cacheResultsTable.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-muted);">اكتب كلمة أو جملة للبحث في الـ 93,000 ترجمة المخزنة...</td></tr>`;
+      cacheResultsTable.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">اكتب كلمة أو جملة للبحث في الـ 93,000 ترجمة المخزنة...</td></tr>`;
       return;
     }
 
@@ -521,7 +585,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await resp.json();
 
       if (!data.results || data.results.length === 0) {
-        cacheResultsTable.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-muted);">لم يتم العثور على نتائج تطابق "${escapeHtml(query)}" في الكاش.</td></tr>`;
+        cacheResultsTable.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">لم يتم العثور على نتائج تطابق "${escapeHtml(query)}" في الكاش.</td></tr>`;
         return;
       }
 
@@ -531,6 +595,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <td style="direction:ltr; text-align:left; font-weight:600;">${escapeHtml(r.en)}</td>
           <td style="color:var(--accent-success);">${escapeHtml(r.ar)}</td>
           <td style="direction:ltr; text-align:left; font-family:var(--font-mono); color:var(--accent-cyan);">${escapeHtml(r.fr)}</td>
+          <td style="font-size:0.75rem; color:var(--accent-purple); font-weight:700;">${escapeHtml(r.model || 'Argos')}</td>
         </tr>
       `).join("");
     } catch {}
@@ -544,11 +609,32 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.stats) {
         const arCount = (data.stats.arabic_cached_entries || 0).toLocaleString();
         const frCount = (data.stats.arabizi_cached_entries || 0).toLocaleString();
-        document.getElementById("headerCacheBadge").textContent = `⚡ الكاش: ${arCount} عربي | ${frCount} فرانكو`;
+        const nllbCount = (data.stats.nllb_cached_entries || 0).toLocaleString();
+
+        document.getElementById("headerCacheBadge").textContent = `⚡ الكاش: ${arCount} Argos | ${nllbCount} NLLB`;
         document.getElementById("aboutArEntries").textContent = arCount;
         document.getElementById("aboutFrEntries").textContent = frCount;
+        const aboutNllb = document.getElementById("aboutNllbEntries");
+        if (aboutNllb) aboutNllb.textContent = nllbCount;
         document.getElementById("aboutEngine").textContent = data.stats.model_engine || "CTranslate2";
         document.getElementById("aboutDevice").textContent = data.stats.device || "CPU int8";
+
+        // Check if NLLB is not available
+        if (!data.stats.nllb_available) {
+          const btnNllb = document.getElementById("btnEngineNllb");
+          if (btnNllb) {
+            btnNllb.disabled = true;
+            btnNllb.title = "نموذج NLLB غير متوفر محلياً";
+            btnNllb.classList.remove("active");
+            document.getElementById("btnEngineArgos").classList.add("active");
+            currentEngine = "argos";
+            if (dialectGroup) dialectGroup.style.display = "none";
+          }
+          if (fileEngineSelect) {
+            fileEngineSelect.value = "argos";
+            if (fileDialectContainer) fileDialectContainer.style.display = "none";
+          }
+        }
       }
     } catch (e) {
       console.warn("Status check failed", e);

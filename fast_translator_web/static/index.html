@@ -80,22 +80,43 @@
     <section class="tab-content active" id="tab-translator">
       <div class="card">
         <!-- Controls Bar -->
-        <div class="controls-bar">
+        <div class="controls-bar" style="flex-direction: column; align-items: stretch; gap: 14px;">
+          <!-- Top Row: Engine & Dialect -->
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <span style="font-size: 0.88rem; font-weight: 700; color: var(--text-secondary);">محرك الترجمة:</span>
+              <div class="mode-pills">
+                <button class="engine-btn active" id="btnEngineNllb" data-engine="nllb">🌟 Meta NLLB-200 (أعلى دقة)</button>
+                <button class="engine-btn" id="btnEngineArgos" data-engine="argos">⚡ Argos (أقصى سرعة + كاش)</button>
+              </div>
+
+              <!-- Dialect pills (visible when NLLB is active) -->
+              <div id="dialectSelectorGroup" style="display: inline-flex; align-items: center; gap: 8px;">
+                <span style="font-size: 0.88rem; font-weight: 700; color: var(--text-secondary);">اللهجة:</span>
+                <div class="mode-pills">
+                  <button class="dialect-btn active" data-dialect="arz_Arab">🇪🇬 مصرية عامية</button>
+                  <button class="dialect-btn" data-dialect="arb_Arab">🇸🇦 فصحى</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Samples -->
+            <div class="quick-samples">
+              <span style="font-size: 0.82rem; color: var(--text-muted);">أمثلة:</span>
+              <span class="sample-tag" data-sample="Welcome brave warrior to the ancient castle. Are you ready for battle?">⚔️ مهمة لعبة</span>
+              <span class="sample-tag" data-sample="Ancient Dragon Sword +5: grants fire damage to undead enemies.">🛡️ وصف سلاح</span>
+              <span class="sample-tag" data-sample="No, I am sorry, none of them sound familiar to me.">💬 حوار شخصية</span>
+            </div>
+          </div>
+
+          <!-- Bottom Row: Display Mode -->
           <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <span style="font-size: 0.88rem; font-weight: 700; color: var(--text-secondary);">نمط العرض:</span>
             <div class="mode-pills">
               <button class="mode-btn active" data-mode="dual">🌟 مزدوج (عربي + فرانكو)</button>
-              <button class="mode-btn" data-mode="arabic">🟢 عربي فصحى فقط</button>
+              <button class="mode-btn" data-mode="arabic">🟢 عربي فقط</button>
               <button class="mode-btn" data-mode="arabizi">🔵 فرانكو / عربيزي فقط</button>
             </div>
-          </div>
-
-          <!-- Samples -->
-          <div class="quick-samples">
-            <span style="font-size: 0.82rem; color: var(--text-muted);">أمثلة سريعة:</span>
-            <span class="sample-tag" data-sample="Welcome brave warrior to the ancient castle. Are you ready for battle?">⚔️ مهمة لعبة</span>
-            <span class="sample-tag" data-sample="Ancient Dragon Sword +5: grants fire damage to undead enemies.">🛡️ وصف سلاح</span>
-            <span class="sample-tag" data-sample="No, I am sorry, none of them sound familiar to me.">💬 حوار شخصية</span>
           </div>
         </div>
 
@@ -231,25 +252,41 @@
         </div>
 
         <!-- Translation Options -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px;">
           <div>
             <label style="display:block; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px;">الملف المحدد حالياً:</label>
             <input type="text" id="selectedFilePath" class="search-input" value="dialog.json" style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.9rem;" placeholder="مثال: dialog.json">
           </div>
 
           <div>
+            <label style="display:block; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px;">محرك الترجمة:</label>
+            <select id="fileEngine" class="search-input" style="padding: 10px 14px;">
+              <option value="nllb" selected>🌟 Meta NLLB-200 (أعلى دقة للألعاب)</option>
+              <option value="argos">⚡ Argos Translate (السرعة القصوى)</option>
+            </select>
+          </div>
+
+          <div id="fileDialectContainer">
+            <label style="display:block; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px;">اللهجة (مع NLLB):</label>
+            <select id="fileDialect" class="search-input" style="padding: 10px 14px;">
+              <option value="arz_Arab" selected>🇪🇬 لهجة مصرية عامية (Natural)</option>
+              <option value="arb_Arab">🇸🇦 لغة عربية فصحى (Standard)</option>
+            </select>
+          </div>
+
+          <div>
             <label style="display:block; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px;">لغة ونمط الإخراج:</label>
             <select id="fileTransMode" class="search-input" style="padding: 10px 14px;">
-              <option value="arabic">🟢 لغة عربية فصحى عادية (Fast Translator Arabic)</option>
-              <option value="arabizi">🔵 لغة الفرانكو / عربيزي (Fast Translator)</option>
+              <option value="arabic">🟢 لغة عربية عادية (عربي)</option>
+              <option value="arabizi">🔵 لغة الفرانكو / عربيزي (Franco)</option>
             </select>
           </div>
 
           <div>
             <label style="display:block; font-size: 0.85rem; font-weight: 700; margin-bottom: 6px;">حجم الدفعة (Batch Size):</label>
             <select id="fileBatchSize" class="search-input" style="padding: 10px 14px;">
-              <option value="128" selected>128 نص / دفعة (أقصى سرعة)</option>
-              <option value="64">64 نص / دفعة</option>
+              <option value="64" selected>64 نص / دفعة (مثالي لـ NLLB)</option>
+              <option value="128">128 نص / دفعة (مثالي لـ Argos)</option>
               <option value="32">32 نص / دفعة</option>
             </select>
           </div>
@@ -376,6 +413,7 @@
               <th>النص الإنجليزي (English)</th>
               <th>الترجمة العربية (Arabic)</th>
               <th>الفرانكو (Franco / Arabizi)</th>
+              <th style="width: 100px;">المصدر</th>
             </tr>
           </thead>
           <tbody id="cacheResultsTable"></tbody>
@@ -390,25 +428,25 @@
       <div class="card">
         <h2 style="font-size: 1.3rem; margin-bottom: 12px;">ℹ️ عن برنامج TurboTranslator Web</h2>
         <p style="color: var(--text-secondary); margin-bottom: 18px;">
-          برنامج مترجم محلي تم بناؤه ليجمع أفضل مميزات <strong>Fast Translator</strong> (الفرانكو/العربيزي) و <strong>Fast Translator Arabic</strong> (العربي العادي) في واجهة مستخدم رسومية حديثة بالكامل عبر صفحة HTML تعمل محلياً وبدون إنترنت بنسبة 100%.
+          برنامج مترجم محلي تم بناؤه ليجمع أفضل مميزات <strong>Fast Translator</strong> (الفرانكو/العربيزي) و <strong>Fast Translator Arabic</strong> مع دعم نموذج الذكاء الاصطناعي العالمي <strong>Meta NLLB-200</strong> باللهجة المصرية الفصحى والعامية في واجهة مستخدم رسومية حديثة بالكامل تعمل محلياً وبدون إنترنت بنسبة 100%.
         </p>
 
         <div class="stats-grid" style="margin-bottom: 24px;">
           <div class="stat-item">
             <div class="stat-val" id="aboutArEntries">0</div>
-            <div class="stat-lbl">ترجمات عربية في الكاش</div>
+            <div class="stat-lbl">ترجمات Argos في الكاش</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-val" id="aboutNllbEntries" style="color: var(--accent-success);">0</div>
+            <div class="stat-lbl">ترجمات NLLB في الكاش</div>
           </div>
           <div class="stat-item">
             <div class="stat-val" id="aboutFrEntries" style="color: var(--accent-cyan);">0</div>
             <div class="stat-lbl">ترجمات فرانكو في الكاش</div>
           </div>
           <div class="stat-item">
-            <div class="stat-val" id="aboutEngine" style="font-size: 1rem; color: var(--accent-success);">CTranslate2</div>
-            <div class="stat-lbl">المحرك العصبي</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-val" id="aboutDevice" style="font-size: 1rem; color: var(--accent-purple);">CPU int8</div>
-            <div class="stat-lbl">التكميم والمعالجة</div>
+            <div class="stat-val" id="aboutEngine" style="font-size: 0.95rem; color: var(--accent-primary);">NLLB-200 & Argos</div>
+            <div class="stat-lbl">المحرك العصبي المزدوج</div>
           </div>
         </div>
 

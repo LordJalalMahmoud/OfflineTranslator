@@ -172,8 +172,15 @@ class TranslatorRequestHandler(SimpleHTTPRequestHandler):
                 data = self._read_json_body()
                 text = data.get("text", "")
                 mode = data.get("mode", "dual")  # 'arabic', 'arabizi', or 'dual'
+                engine_type = data.get("engine", "nllb")  # 'nllb' or 'argos'
+                dialect = data.get("dialect", "arb_Arab")  # 'arb_Arab' or 'arz_Arab'
                 engine = WebTranslationEngine.get_instance()
-                result = engine.translate_single(text, mode=mode)
+                result = engine.translate_single(
+                    text,
+                    mode=mode,
+                    engine_type=engine_type,
+                    dialect=dialect
+                )
                 return self._send_json_response(result)
 
             # 2. تحويل عربي إلى فرانكو مباشر بدون نموذج ذكاء اصطناعي
@@ -188,9 +195,13 @@ class TranslatorRequestHandler(SimpleHTTPRequestHandler):
                 data = self._read_json_body()
                 file_type = data.get("type", "path")
                 mode = data.get("mode", "arabic")
-                batch_size = int(data.get("batch_size", 128))
+                engine_type = data.get("engine", "nllb")
+                dialect = data.get("dialect", "arb_Arab")
+                batch_size = int(data.get("batch_size", 64 if engine_type == "nllb" else 128))
                 task_id = str(uuid.uuid4())
                 engine = WebTranslationEngine.get_instance()
+
+                dialect_suffix = "_egypt" if dialect == "arz_Arab" else ""
 
                 if file_type == "path":
                     input_path = data.get("path")
@@ -202,7 +213,7 @@ class TranslatorRequestHandler(SimpleHTTPRequestHandler):
                     if not abs_path.exists():
                         return self._send_json_response({"error": f"الملف {input_path} غير موجود على الخادم."}, 400)
 
-                    out_name = f"{abs_path.stem}_{mode}{abs_path.suffix}"
+                    out_name = f"{abs_path.stem}_{mode}_{engine_type}{dialect_suffix}{abs_path.suffix}"
                     output_path = abs_path.parent / out_name
 
                     engine.start_file_translation(
@@ -210,19 +221,23 @@ class TranslatorRequestHandler(SimpleHTTPRequestHandler):
                         input_path=str(abs_path),
                         output_path=str(output_path),
                         mode=mode,
+                        engine_type=engine_type,
+                        dialect=dialect,
                         batch_size=batch_size,
                     )
                 else:
                     # محتوى مرسل مباشرة من المتصفح
                     content = data.get("content", "")
                     filename = data.get("filename", "dialog.json")
-                    out_path = engine.project_root / f"translated_{mode}_{filename}"
+                    out_path = engine.project_root / f"translated_{mode}_{engine_type}{dialect_suffix}_{filename}"
 
                     engine.start_file_translation(
                         task_id=task_id,
                         input_content=content,
                         output_path=str(out_path),
                         mode=mode,
+                        engine_type=engine_type,
+                        dialect=dialect,
                         batch_size=batch_size,
                     )
 

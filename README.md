@@ -1,7 +1,11 @@
 # برنامج الترجمة المحلي بالكامل (English → Arabic Offline Translator)
 
 برنامج ترجمة آلي عصبي محلي **100% بدون إنترنت** يعمل بكفاءة وسرعة فائقة على أنظمة **Windows** و **Linux**.
-يجمع بين الترجمة إلى **اللغة العربية الفصحى** ولغة **الفرانكو / العربيزي (Arabizi)** مع واجهة ويب عصرية وواجهة مكتبية.
+يجمع بين الترجمة إلى **اللغة العربية الفصحى** و**اللهجة المصرية العامية** ولغة **الفرانكو / العربيزي (Arabizi)** مع واجهة ويب عصرية تفاعلية وأدوات ترجمة دفعات لملفات الألعاب (dialog.json).
+
+يدعم محركين للذكاء الاصطناعي أوفلاين:
+1. 🌟 **Meta NLLB-200 (600M int8):** نموذج الذكاء الاصطناعي الأقوى عالمياً من ميتا، دقة لغوية استثنائية مع دعم اللهجة المصرية (`arz_Arab`) والفصحى (`arb_Arab`).
+2. ⚡ **Argos Translate (en_ar):** نموذج خفيف فائق السرعة مع كاش محلي يحتوي على أكثر من 93,000 ترجمة جاهزة للألعاب.
 
 ---
 
@@ -14,6 +18,24 @@
 3. للتشغيل المباشر:
    * **واجهة الويب العصرية (HTML):** انقر نقراً مزدوجاً على 👉 **`run_web.bat`** وسيفتح المتصفح تلقائياً على `http://127.0.0.1:8765`.
    * **الواجهة المكتبية (Desktop GUI):** انقر نقراً مزدوجاً على 👉 **`run_gui.bat`**.
+
+---
+
+## 🎮 أدوات ترجمة ملفات الألعاب الفائقة (dialog.json):
+
+### 1. ترجمة عربية فصحى أو مصرية عامية عبر Meta NLLB:
+```bash
+# لهجة مصرية عامية (Natural RPG Game Dialogue)
+python3 fast_translator_arabic/turbo_translator.py --input dialog.json --output dialog_egypt.json --engine nllb --dialect arz_Arab
+
+# لغة عربية فصحى
+python3 fast_translator_arabic/turbo_translator.py --input dialog.json --output dialog_fusha.json --engine nllb --dialect arb_Arab
+```
+
+### 2. ترجمة فرانكو / عربيزي عبر Meta NLLB:
+```bash
+python3 fast_translator/turbo_translator.py --input dialog.json --output dialog_franco.json --engine nllb --dialect arz_Arab
+```
 
 ---
 

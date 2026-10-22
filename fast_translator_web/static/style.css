@@ -305,6 +305,35 @@ html, body {
   box-shadow: 0 2px 8px var(--glow-primary);
 }
 
+.engine-btn, .dialect-btn {
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 20px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.engine-btn:hover, .dialect-btn:hover {
+  color: var(--text-primary);
+}
+
+.engine-btn.active {
+  background: linear-gradient(135deg, #10b981, #06b6d4);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+}
+
+.dialect-btn.active {
+  background: linear-gradient(135deg, #f59e0b, #ec4899);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+}
+
 .quick-samples {
   display: flex;
   align-items: center;

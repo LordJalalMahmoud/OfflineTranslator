@@ -37,6 +37,20 @@ SPECIAL_GAME_TOKENS = {
 JSON_TEXT_PATTERN = re.compile(r'("text":\s*)"((?:[^"\\]|\\.)*)"')
 
 
+def find_nllb_model_dir() -> Optional[Path]:
+    """البحث التلقائي عن مسار نموذج Meta NLLB-200 المحلي."""
+    root_dir = Path(__file__).resolve().parent.parent
+    candidates = [
+        root_dir / "models" / "nllb-600m-ct2",
+        root_dir.parent / "nllb_translator" / "models" / "nllb-600m-ct2",
+        Path.home() / "nllb_translator" / "models" / "nllb-600m-ct2",
+    ]
+    for c in candidates:
+        if (c / "model.bin").exists():
+            return c
+    return None
+
+
 def find_model_dir() -> Path:
     """البحث التلقائي الذكي عن مسار حزمة النموذج Argos Translate (يدعم Windows و Linux)."""
     # 1. البحث في مجلد المشروع المحلي models/en_ar إن وجد
@@ -141,10 +155,18 @@ class WebTranslationEngine:
         # مسارات الكاش
         self.arabic_cache_path = self.project_root / "fast_translator_arabic" / "translation_cache.json"
         self.arabizi_cache_path = self.project_root / "fast_translator" / "translation_cache.json"
-        
+        self.nllb_arabic_cache_path = self.project_root / "fast_translator_arabic" / "translation_cache_nllb.json"
+        self.nllb_arabizi_cache_path = self.project_root / "fast_translator" / "translation_cache_nllb.json"
+        self.nllb_egypt_cache_path = self.project_root / "fast_translator_arabic" / "translation_cache_nllb_egypt.json"
+        self.nllb_egypt_arabizi_cache_path = self.project_root / "fast_translator" / "translation_cache_nllb_egypt.json"
+
         # القواميس المحملة في الذاكرة
         self.arabic_cache: Dict[str, str] = {}
         self.arabizi_cache: Dict[str, str] = {}
+        self.nllb_arb_cache: Dict[str, str] = {}
+        self.nllb_arb_franco_cache: Dict[str, str] = {}
+        self.nllb_arz_cache: Dict[str, str] = {}
+        self.nllb_arz_franco_cache: Dict[str, str] = {}
         self.cache_lock = threading.Lock()
         
         # مؤشرات المهام الجارية
@@ -171,51 +193,136 @@ class WebTranslationEngine:
         )
         self.translator_lock = threading.Lock()
 
-        # 3. تحميل الكاش
+        # 3. تهيئة Meta NLLB-200 إن كان متوفراً
+        self.nllb_dir = find_nllb_model_dir()
+        self.nllb_tokenizer = None
+        self.nllb_translator = None
+        self._init_nllb()
+
+        # 4. تحميل الكاش
         self.load_caches()
 
-    def load_caches(self):
-        """تحميل الكاش الخاص بالعربية والفرانكو من الأقراص إلى الذاكرة."""
-        with self.cache_lock:
-            if self.arabic_cache_path.exists():
-                try:
-                    with open(self.arabic_cache_path, "r", encoding="utf-8") as f:
-                        self.arabic_cache = json.load(f)
-                except Exception as e:
-                    print(f"[CACHE WARNING] Arabic cache read error: {e}")
-                    self.arabic_cache = {}
+    def _init_nllb(self):
+        """تهيئة معالج ونموذج Meta NLLB-200 في خلفية المحرك."""
+        if self.nllb_dir and (self.nllb_dir / "model.bin").exists():
+            try:
+                from transformers import AutoTokenizer
+                print(f"[NLLB] تهيئة نموذج Meta NLLB-200 من: {self.nllb_dir}")
+                self.nllb_tokenizer = AutoTokenizer.from_pretrained(str(self.nllb_dir), src_lang="eng_Latn")
+                self.nllb_translator = ctranslate2.Translator(
+                    str(self.nllb_dir),
+                    device="cpu",
+                    inter_threads=2,
+                    intra_threads=2,
+                    compute_type="int8",
+                )
+                print("[NLLB] تم دمج نموذج Meta NLLB-200 بنجاح في محرك الويب!")
+            except Exception as e:
+                print(f"[NLLB WARNING] فشل تحميل NLLB: {e}")
 
-            if self.arabizi_cache_path.exists():
-                try:
-                    with open(self.arabizi_cache_path, "r", encoding="utf-8") as f:
-                        self.arabizi_cache = json.load(f)
-                except Exception as e:
-                    print(f"[CACHE WARNING] Arabizi cache read error: {e}")
-                    self.arabizi_cache = {}
+    def _load_single_cache(self, path: Path) -> Dict[str, str]:
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"[CACHE WARNING] Error reading {path.name}: {e}")
+        return {}
+
+    def _save_single_cache(self, path: Path, data: Dict[str, str]):
+        if not data:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            tmp.replace(path)
+        except Exception as e:
+            print(f"[CACHE SAVE ERROR] {path.name}: {e}")
+
+    def load_caches(self):
+        """تحميل الكاش الخاص بالعربية والفرانكو ونماذج NLLB من الأقراص إلى الذاكرة."""
+        with self.cache_lock:
+            self.arabic_cache = self._load_single_cache(self.arabic_cache_path)
+            self.arabizi_cache = self._load_single_cache(self.arabizi_cache_path)
+            self.nllb_arb_cache = self._load_single_cache(self.nllb_arabic_cache_path)
+            self.nllb_arb_franco_cache = self._load_single_cache(self.nllb_arabizi_cache_path)
+            self.nllb_arz_cache = self._load_single_cache(self.nllb_egypt_cache_path)
+            self.nllb_arz_franco_cache = self._load_single_cache(self.nllb_egypt_arabizi_cache_path)
 
     def save_caches(self):
         """حفظ الكاش على القرص بأمان."""
         with self.cache_lock:
-            try:
-                if self.arabic_cache:
-                    tmp_ar = self.arabic_cache_path.with_suffix(".tmp")
-                    with open(tmp_ar, "w", encoding="utf-8") as f:
-                        json.dump(self.arabic_cache, f, ensure_ascii=False)
-                    tmp_ar.replace(self.arabic_cache_path)
+            self._save_single_cache(self.arabic_cache_path, self.arabic_cache)
+            self._save_single_cache(self.arabizi_cache_path, self.arabizi_cache)
+            self._save_single_cache(self.nllb_arabic_cache_path, self.nllb_arb_cache)
+            self._save_single_cache(self.nllb_arabizi_cache_path, self.nllb_arb_franco_cache)
+            self._save_single_cache(self.nllb_egypt_cache_path, self.nllb_arz_cache)
+            self._save_single_cache(self.nllb_egypt_arabizi_cache_path, self.nllb_arz_franco_cache)
 
-                if self.arabizi_cache:
-                    tmp_fr = self.arabizi_cache_path.with_suffix(".tmp")
-                    with open(tmp_fr, "w", encoding="utf-8") as f:
-                        json.dump(self.arabizi_cache, f, ensure_ascii=False)
-                    tmp_fr.replace(self.arabizi_cache_path)
-            except Exception as e:
-                print(f"[CACHE SAVE ERROR] {e}")
+    def get_cache_pair(self, engine_type: str = "nllb", dialect: str = "arb_Arab") -> Tuple[Dict[str, str], Dict[str, str]]:
+        """الحصول على زوج الكاش المناسب (عربي، فرانكو) بحسب المحرك واللهجة."""
+        if engine_type == "nllb" and self.nllb_translator:
+            if dialect == "arz_Arab":
+                return self.nllb_arz_cache, self.nllb_arz_franco_cache
+            return self.nllb_arb_cache, self.nllb_arb_franco_cache
+        return self.arabic_cache, self.arabizi_cache
 
-    def translate_raw_batch_model(self, texts: List[str]) -> List[str]:
-        """ترجمة دفعة من النصوص عبر نموذج CTranslate2 مباشرة وتوليد العربية."""
+    def translate_raw_batch_model(
+        self,
+        texts: List[str],
+        engine_type: str = "nllb",
+        dialect: str = "arb_Arab"
+    ) -> List[str]:
+        """ترجمة دفعة من النصوص عبر محرك الذكاء الاصطناعي المحدد وتوليد النص العربي."""
         if not texts:
             return []
 
+        # 1. إذا كان المحرك NLLB ونموذجه متوفر
+        if engine_type == "nllb" and self.nllb_translator and self.nllb_tokenizer:
+            flat_subtexts = []
+            chunk_counts = []
+            for t in texts:
+                chunks = chunk_text(t, max_chars=350)
+                flat_subtexts.extend(chunks)
+                chunk_counts.append(len(chunks))
+
+            tokens_batch = [
+                self.nllb_tokenizer.convert_ids_to_tokens(self.nllb_tokenizer.encode(st))
+                for st in flat_subtexts
+            ]
+            target_prefix = [[dialect]] * len(flat_subtexts)
+
+            with self.translator_lock:
+                results = self.nllb_translator.translate_batch(
+                    tokens_batch,
+                    target_prefix=target_prefix,
+                    beam_size=1,
+                    max_batch_size=64,
+                    batch_type="examples",
+                    replace_unknowns=True,
+                )
+
+            sub_translations = []
+            for r in results:
+                tokens = r.hypotheses[0]
+                if tokens and tokens[0] == dialect:
+                    tokens = tokens[1:]
+                token_ids = self.nllb_tokenizer.convert_tokens_to_ids(tokens)
+                ar_text = self.nllb_tokenizer.decode(token_ids, skip_special_tokens=True).strip()
+                sub_translations.append(ar_text)
+
+            translations = []
+            idx = 0
+            for count in chunk_counts:
+                joined = " ".join(sub_translations[idx : idx + count])
+                translations.append(joined.strip())
+                idx += count
+
+            return translations
+
+        # 2. المحرك الكلاسيكي Argos Translate
         tokens_batch = [self.sp.encode(t, out_type=str) for t in texts]
 
         with self.translator_lock:
@@ -234,16 +341,34 @@ class WebTranslationEngine:
 
         return translations
 
-    def translate_single(self, text: str, mode: str = "dual") -> dict:
+    def translate_single(
+        self,
+        text: str,
+        mode: str = "dual",
+        engine_type: str = "nllb",
+        dialect: str = "arb_Arab"
+    ) -> dict:
         """
         ترجمة نص واحد فوري (سواء جملة واحدة أو نص متعدد الأسطر).
         الأنماط:
-        - "arabic": عربي فصحى فقط
+        - "arabic": عربي فقط
         - "arabizi": فرانكو/عربيزي فقط
-        - "dual": يعيد العربي الفصحى والفرانكو معاً
+        - "dual": يعيد العربي والفرانكو معاً
+        المحركات:
+        - "nllb": نموذج Meta NLLB-200 عالي الجودة
+        - "argos": نموذج Argos Translate فائق السرعة
+        اللهجة:
+        - "arb_Arab": فصحى
+        - "arz_Arab": مصري عامية
         """
         start_time = time.perf_counter()
         clean_text = text.strip()
+
+        # ضبط المحرك الفعلي
+        if engine_type == "nllb" and not self.nllb_translator:
+            engine_type = "argos"
+
+        active_ar_cache, active_fr_cache = self.get_cache_pair(engine_type, dialect)
 
         if not clean_text:
             return {
@@ -251,6 +376,8 @@ class WebTranslationEngine:
                 "arabic": "",
                 "arabizi": "",
                 "source": "empty",
+                "engine": engine_type,
+                "dialect": dialect,
                 "elapsed_ms": 0.0,
             }
 
@@ -260,13 +387,15 @@ class WebTranslationEngine:
                 "arabic": clean_text,
                 "arabizi": clean_text,
                 "source": "passthrough",
+                "engine": engine_type,
+                "dialect": dialect,
                 "elapsed_ms": 0.1,
             }
 
         # فحص وجود النص بالكامل في الكاش مباشرة
         with self.cache_lock:
-            cached_ar = self.arabic_cache.get(clean_text)
-            cached_fr = self.arabizi_cache.get(clean_text)
+            cached_ar = active_ar_cache.get(clean_text)
+            cached_fr = active_fr_cache.get(clean_text)
 
         if cached_ar and cached_fr:
             elapsed = (time.perf_counter() - start_time) * 1000
@@ -275,19 +404,23 @@ class WebTranslationEngine:
                 "arabic": cached_ar,
                 "arabizi": cached_fr,
                 "source": "cache",
+                "engine": engine_type,
+                "dialect": dialect,
                 "elapsed_ms": round(elapsed, 2),
             }
 
         if cached_ar and not cached_fr:
             fr_val = arabic_to_arabizi(cached_ar)
             with self.cache_lock:
-                self.arabizi_cache[clean_text] = fr_val
+                active_fr_cache[clean_text] = fr_val
             elapsed = (time.perf_counter() - start_time) * 1000
             return {
                 "text": text,
                 "arabic": cached_ar,
                 "arabizi": fr_val,
                 "source": "cache",
+                "engine": engine_type,
+                "dialect": dialect,
                 "elapsed_ms": round(elapsed, 2),
             }
 
@@ -305,8 +438,8 @@ class WebTranslationEngine:
                 l_strip = l.strip()
                 if not l_strip or is_trivial_text(l_strip):
                     line_map.append(("trivial", l_strip))
-                elif l_strip in self.arabic_cache:
-                    line_map.append(("cache", self.arabic_cache[l_strip]))
+                elif l_strip in active_ar_cache:
+                    line_map.append(("cache", active_ar_cache[l_strip]))
                 else:
                     line_map.append(("need_translation", l_strip))
                     missing_to_translate.append(l_strip)
@@ -314,15 +447,18 @@ class WebTranslationEngine:
         # ترجمة الأسطر الناقصة بالدفعة
         new_translations = {}
         if missing_to_translate:
-            # إزالة التكرار داخل نفس الطلب
             unique_missing = list(dict.fromkeys(missing_to_translate))
-            results = self.translate_raw_batch_model(unique_missing)
+            results = self.translate_raw_batch_model(
+                unique_missing,
+                engine_type=engine_type,
+                dialect=dialect
+            )
             for orig, ar_res in zip(unique_missing, results):
                 new_translations[orig] = ar_res
                 # إضافة للكاش
                 with self.cache_lock:
-                    self.arabic_cache[orig] = ar_res
-                    self.arabizi_cache[orig] = arabic_to_arabizi(ar_res)
+                    active_ar_cache[orig] = ar_res
+                    active_fr_cache[orig] = arabic_to_arabizi(ar_res)
         else:
             source_type = "cache"
 
@@ -340,10 +476,10 @@ class WebTranslationEngine:
         final_fr = arabic_to_arabizi(final_ar)
 
         # إذا كانت جملة واحدة نقوم بتخزينها بالكامل
-        if len(lines) == 1 and clean_text not in self.arabic_cache:
+        if len(lines) == 1 and clean_text not in active_ar_cache:
             with self.cache_lock:
-                self.arabic_cache[clean_text] = final_ar
-                self.arabizi_cache[clean_text] = final_fr
+                active_ar_cache[clean_text] = final_ar
+                active_fr_cache[clean_text] = final_fr
 
         elapsed = (time.perf_counter() - start_time) * 1000
         return {
@@ -351,11 +487,13 @@ class WebTranslationEngine:
             "arabic": final_ar,
             "arabizi": final_fr,
             "source": source_type,
+            "engine": engine_type,
+            "dialect": dialect,
             "elapsed_ms": round(elapsed, 2),
         }
 
     def search_cache(self, query: str, limit: int = 50) -> List[dict]:
-        """البحث في الكاش المخزن لعرض النتائج الفورية للمستخدم."""
+        """البحث في الكاش المخزن لعرض النتائج الفورية للمستخدم عبر كل النماذج."""
         q = query.strip().lower()
         if not q:
             return []
@@ -363,14 +501,26 @@ class WebTranslationEngine:
         results = []
         with self.cache_lock:
             count = 0
-            # فحص النصوص الإنجليزية وقيم العربية
-            for en, ar in self.arabic_cache.items():
-                if q in en.lower() or q in ar:
-                    fr = self.arabizi_cache.get(en, arabic_to_arabizi(ar))
-                    results.append({"en": en, "ar": ar, "fr": fr})
-                    count += 1
-                    if count >= limit:
-                        break
+            seen_en = set()
+
+            # فحص كاش Argos وكاش NLLB معاً
+            cache_sources = [
+                ("Argos", self.arabic_cache, self.arabizi_cache),
+                ("NLLB-Fusha", self.nllb_arb_cache, self.nllb_arb_franco_cache),
+                ("NLLB-Egypt", self.nllb_arz_cache, self.nllb_arz_franco_cache),
+            ]
+
+            for tag, ar_dict, fr_dict in cache_sources:
+                for en, ar in ar_dict.items():
+                    if en in seen_en:
+                        continue
+                    if q in en.lower() or q in ar:
+                        fr = fr_dict.get(en, arabic_to_arabizi(ar))
+                        results.append({"en": en, "ar": ar, "fr": fr, "model": tag})
+                        seen_en.add(en)
+                        count += 1
+                        if count >= limit:
+                            return results
 
         return results
 
@@ -379,15 +529,21 @@ class WebTranslationEngine:
         with self.cache_lock:
             ar_count = len(self.arabic_cache)
             fr_count = len(self.arabizi_cache)
+            nllb_count = len(self.nllb_arb_cache) + len(self.nllb_arz_cache)
 
         return {
             "arabic_cached_entries": ar_count,
             "arabizi_cached_entries": fr_count,
+            "nllb_cached_entries": nllb_count,
+            "argos_available": self.translator is not None,
+            "nllb_available": self.nllb_translator is not None,
+            "default_engine": "nllb" if self.nllb_translator is not None else "argos",
             "model_path": str(self.model_dir),
+            "nllb_model_path": str(self.nllb_dir) if self.nllb_dir else None,
             "device": "CPU (int8 quantized)",
             "batch_support": True,
             "offline_ready": True,
-            "model_engine": "CTranslate2 C++ & SentencePiece",
+            "model_engine": "Meta NLLB-200 & Argos (CTranslate2 C++)",
         }
 
     def start_file_translation(
@@ -397,13 +553,18 @@ class WebTranslationEngine:
         input_path: Optional[str] = None,
         output_path: Optional[str] = None,
         mode: str = "arabic",
-        batch_size: int = 128,
+        engine_type: str = "nllb",
+        dialect: str = "arb_Arab",
+        batch_size: int = 64,
     ):
         """بدء عملية ترجمة ملف ضخم في خلفية النظام مع تحديث حالة التقدم المباشر."""
         with self.task_lock:
             self.active_tasks[task_id] = {
                 "task_id": task_id,
                 "status": "running",
+                "engine": engine_type,
+                "dialect": dialect,
+                "mode": mode,
                 "progress_percent": 0.0,
                 "total_lines": 0,
                 "processed_lines": 0,
@@ -420,7 +581,7 @@ class WebTranslationEngine:
 
         thread = threading.Thread(
             target=self._run_file_translation_thread,
-            args=(task_id, input_content, input_path, output_path, mode, batch_size),
+            args=(task_id, input_content, input_path, output_path, mode, engine_type, dialect, batch_size),
             daemon=True,
         )
         thread.start()
@@ -441,12 +602,21 @@ class WebTranslationEngine:
         input_path: Optional[str],
         output_path: Optional[str],
         mode: str,
+        engine_type: str,
+        dialect: str,
         batch_size: int,
     ):
         task = self.active_tasks[task_id]
         start_time = time.time()
 
         try:
+            # التحقق من توفر NLLB
+            if engine_type == "nllb" and not self.nllb_translator:
+                engine_type = "argos"
+                task["engine"] = "argos"
+
+            active_ar_cache, active_fr_cache = self.get_cache_pair(engine_type, dialect)
+
             # 1. قراءة أسطر الملف
             if input_content is not None:
                 lines = input_content.splitlines(keepends=True)
@@ -477,7 +647,7 @@ class WebTranslationEngine:
                         line_records.append((i, "trivial", line, text_content))
                     else:
                         with self.cache_lock:
-                            cached = self.arabic_cache.get(clean_text) if mode == "arabic" else self.arabizi_cache.get(clean_text)
+                            cached = active_ar_cache.get(clean_text) if mode == "arabic" else active_fr_cache.get(clean_text)
                         
                         if cached:
                             task["cache_hits"] += 1
@@ -486,12 +656,15 @@ class WebTranslationEngine:
                             line_records.append((i, "need", line, clean_text))
                             needed_texts.append(clean_text)
                 else:
-                    # سطر JSON عادي ليس حقلاً نصياً
                     line_records.append((i, "passthrough", line, None))
 
             # 3. ترجمة النصوص الناقصة عبر CTranslate2 بالدفعات
             unique_needed = list(dict.fromkeys(needed_texts))
             translated_dict = {}
+
+            # ضبط حجم الدفعة المناسب
+            if not batch_size or batch_size <= 0:
+                batch_size = 64 if engine_type == "nllb" else 128
 
             total_needed = len(unique_needed)
             for b_idx in range(0, total_needed, batch_size):
@@ -500,7 +673,11 @@ class WebTranslationEngine:
                     return
 
                 batch = unique_needed[b_idx : b_idx + batch_size]
-                results = self.translate_raw_batch_model(batch)
+                results = self.translate_raw_batch_model(
+                    batch,
+                    engine_type=engine_type,
+                    dialect=dialect
+                )
 
                 for orig, ar_res in zip(batch, results):
                     if mode == "arabic":
@@ -510,8 +687,8 @@ class WebTranslationEngine:
 
                     translated_dict[orig] = final_res
                     with self.cache_lock:
-                        self.arabic_cache[orig] = ar_res
-                        self.arabizi_cache[orig] = arabic_to_arabizi(ar_res)
+                        active_ar_cache[orig] = ar_res
+                        active_fr_cache[orig] = arabic_to_arabizi(ar_res)
 
                 task["newly_translated"] += len(batch)
                 processed = task["cache_hits"] + task["newly_translated"]

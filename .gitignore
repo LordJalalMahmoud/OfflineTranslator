@@ -17,6 +17,11 @@ __pycache__/
 .DS_Store
 1
 
+# Models
+models/
+*.argosmodel
+*.bin
+
 # Large Generated Output Files & Duplicates
 *_out.json
 dialog_fast_out.json
