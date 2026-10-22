@@ -1,0 +1,28 @@
+# Python Virtual Environment
+venv/
+env/
+.venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs & Temporary Files
+*.log
+*.tmp
+*.bak
+*.swp
+.*.bkp
+.DS_Store
+1
+
+# Large Generated Output Files & Duplicates
+*_out.json
+dialog_fast_out.json
+translated_*.json
+test_out.json
+fast_translator_arabic/dialog.json
+fast_translator_arabic/dialog_arabic.json
+fast_translator/dialog_arabizi.json
+fast_translator/dialog_arabic.json

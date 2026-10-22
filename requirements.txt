@@ -1,0 +1,9 @@
+# Offline English to Arabic Translator
+# المحرك العصبي فائق السرعة للترجمة بدون إنترنت
+ctranslate2>=4.0.0
+sentencepiece>=0.1.99
+argostranslate>=1.11.0
+
+# تحسين رسم الخطوط العربية للواجهة الرسومية Tkinter (اختياري)
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
